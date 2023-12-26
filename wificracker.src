@@ -1,0 +1,74 @@
+crypto = include_lib("/lib/crypto.so") // load up crypto with library
+if not crypto then 
+	exit("Missing crypto library") 
+end if
+	
+hostPC = get_shell.host_computer
+interface = "wlan0"
+if not crypto.airmon("start", interface) then 
+	exit ("Can not start monitoring on " + interface) 
+end if
+	
+networks = hostPC.wifi_networks(interface)
+if not networks then 
+	exit("Unable to fetch networks list...") 
+end if
+
+uncracked_networks = []
+
+for network in networks 
+	split = network.split(" ")
+	bssid = split[0]
+	strength = to_int(split[1][:-1])
+	essid = split[2]
+	n = { "strength": strength, "bssid": bssid, "essid": essid }
+	print(n)
+	uncracked_networks.push(n)
+end for
+
+uncracked_networks = sort(uncracked_networks, "strength", 0)
+cracked_networks = []
+
+for network in uncracked_networks
+	print("------------ Working on " + network.essid + " ------------")
+	
+	acks = 310000
+	if network.strength >= 60 then 
+		acks = 5000
+	else if network.strength >= 43 then 
+		acks = 7000
+	else if network.strength >= 30 then 
+		acks = 11000
+	else if network.strength >= 10 then 
+		acks = 31000
+	else if network.strength >= 5 then 
+		acks = 61000
+	end if
+				
+	print("Running aireplay until acquiring " + acks + " acks...")
+				
+	password = crypto.aireplay(network.bssid, network.essid, acks)
+	capfilepath = home_dir + "/file.cap"
+	capfile = hostPC.File(capfilepath)
+	if not capfile then 
+		exit("Cap file is missing. Did you run aireplay?") 
+	end if
+	if not capfile.has_permission("r") then 
+		exit("Insufficient permission to open cap file for reading.") 
+	end if
+
+	pass = crypto.aircrack(capfilepath)
+	if not pass then 
+		exit("Could not crack key, not enough acks.") 
+	end if	
+	print("Password cracked! [ <b>" + pass + "</b> ]")	
+	capfile.delete
+	
+	n = { "strength": network.strength, "bssid": network.bssid, "essid": network.essid, "pass": pass } 
+	print(n)
+	cracked_networks.push(n)
+end for
+
+for network in cracked_networks 
+	print(network.essid + " " + network.pass)
+end for
